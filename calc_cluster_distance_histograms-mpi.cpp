@@ -1,5 +1,5 @@
 
-	#include <mpi.h>
+    #include <mpi.h>
 
 
 
@@ -54,10 +54,10 @@ bool get_next_line(istream& str, string & line)
 {
     // Read a line and return it, with error checking.
     
-        getline(str, line);
+    getline(str, line);
 
-        if(!str)
-            return false;
+    if(!str)
+        return false;
     
     return true;
 }
@@ -72,14 +72,19 @@ void read_flat_clusters(string clufile, int npairs_per_cluster, vector<double > 
     vector<string>          line_contents;
     int                     n_contents;
     vector<double>          one_cluster(npairs_per_cluster);
+    
+    int idx=-1;
 
     while (get_next_line(clustream, line))
     {
+        idx++;
         n_contents = split_line(line, line_contents);
         
         if (n_contents != npairs_per_cluster)
         {
-            cout << "ERROR: Read the wrong number of clusters!" << endl;
+            cout << "ERROR: Read the wrong number of clusters while reading file!" << endl;
+            cout << "file: " << clufile << endl;
+            cout << "line: " << line << endl;
             cout << "n_contents: " <<  n_contents << endl;
             cout << "npairs_per_cluster: " <<  npairs_per_cluster << endl;
             exit(0);
@@ -122,43 +127,44 @@ int get_bin(double binw, double maxval, double dist)
 
 void divide_task(int & my_rank_start, int & my_rank_end, int tasks) 
 {
-	int procs_used;
+    int procs_used;
 
-	// Deal with no tasks to perform.
-	if ( tasks <= 0 ) 
-	{
-	  my_rank_start = 1 ;
-	  my_rank_end = 0 ;
-	  return ;
-	}
+    // Deal with no tasks to perform.
+    if ( tasks <= 0 ) 
+    {
+        my_rank_start = 1 ;
+        my_rank_end = 0 ;
+        return ;
+    }
 
-	// Deal gracefully with more tasks than processors.
-	if ( nprocs <= tasks ) 
-		procs_used = nprocs;
-	else
-		procs_used = tasks;
+    // Deal gracefully with more tasks than processors.
+    if ( nprocs <= tasks ) 
+        procs_used = nprocs;
+    else
+        procs_used = tasks;
 
-	// Use ceil so the last process always has fewer tasks than the other
-	// This improves load balancing.
-	my_rank_start = ceil( (double) my_rank * tasks / procs_used);
+    // Use ceil so the last process always has fewer tasks than the other ... This improves load balancing.
+    my_rank_start = ceil( (double) my_rank * tasks / procs_used);
 
-	if ( my_rank > tasks ) 
-	{
-		my_rank_start = tasks + 1;
-		my_rank_end = tasks - 1;
-	} 
-	else if ( my_rank == procs_used - 1 ) 
-	{
-		// End of the list.
-		my_rank_end = tasks - 1;
-	} 
-	else 
-	{
-		// Next starting value - 1 .
-		my_rank_end   = ceil( (double) (my_rank+1) * tasks / procs_used ) - 1;
-		if ( my_rank_end > tasks - 1 ) 
-			my_rank_end = tasks - 1;
-	}
+    if ( my_rank > tasks ) 
+    {
+        my_rank_start = tasks + 1;
+        my_rank_end = tasks - 1;
+    } 
+
+    else if ( my_rank == procs_used - 1 ) 
+    {
+        // End of the list.
+        my_rank_end = tasks - 1;
+    } 
+
+    else 
+    {
+        // Next starting value - 1 .
+        my_rank_end   = ceil( (double) (my_rank+1) * tasks / procs_used ) - 1;
+        if ( my_rank_end > tasks - 1 ) 
+            my_rank_end = tasks - 1;
+    }
 }
 
 
@@ -172,7 +178,7 @@ void gen_flat_hists(vector<double > & clu1, vector<double > & clu2, int n_cluste
     long long int           my_nsamples = 0;
     long long int           nsamples = 0;
     int                     my_rank_start;
-    int                     my_rank_end;	
+    int                     my_rank_end;    
     int                     looptwo_start;
     int                     total_tasks; 
     int                     status;
@@ -180,7 +186,7 @@ void gen_flat_hists(vector<double > & clu1, vector<double > & clu2, int n_cluste
     
     // Distribute outer loop over processors
     
-    divide_task(my_rank_start, my_rank_end, clu1.size()/n_cluster_pairs);	// Divide atoms on a per-processor basis.
+    divide_task(my_rank_start, my_rank_end, clu1.size()/n_cluster_pairs);    // Divide atoms on a per-processor basis.
     total_tasks = my_rank_end-my_rank_start;
     
     if(my_rank ==0)
@@ -189,66 +195,62 @@ void gen_flat_hists(vector<double > & clu1, vector<double > & clu2, int n_cluste
     if (total_tasks>0)
     {
 
-    for (int i=my_rank_start; i<=my_rank_end; i++)
-    {   
+        for (int i=my_rank_start; i<=my_rank_end; i++)
+        {   
 
-         
-        // Print progress
-        
-        status = double(i-my_rank_start)/(total_tasks)*100.0;
-	
-
-	// This logic needed to avoid div by zero when total_tasks/10 is zero (since they are integer types)
-        if (my_rank == 0)
-		if ((total_tasks/10) == 0)
-            		cout << histfile << " Completion percent: " << status << " " << i << " of " << total_tasks << " assigned" << endl;
-		else if(i%(total_tasks/10) == 0)
-			cout << histfile << " Completion percent: " << status << " " << i << " of " << total_tasks << " assigned" << endl;
-        
-        
-        // Modify bounds in case this is a self-calculation
-        
-        if (same)
-            looptwo_start = i+1;
-        else
-            looptwo_start = 0;
-        
-        // Compute the distances
-        // Need to determine the flat index for the item
-        // Should be i*n_cluster_pairs
-        
-        for (int j=looptwo_start; j<clu2.size()/n_cluster_pairs; j++)
-        {
-            dist = 0;
-    
-            for (int k=0; k<n_cluster_pairs; k++)
-                dist += pow(clu1[i*n_cluster_pairs+k] - clu2[j*n_cluster_pairs+k],2.0);
-
-            bin  = get_bin(binw, maxd, sqrt(dist));
+            // Print progress
             
-            if (bin > nbin)
+            status = double(i-my_rank_start)/(total_tasks)*100.0;
+        
+
+            // This logic needed to avoid div by zero when total_tasks/10 is zero (since they are integer types)
+            if (my_rank == 0)
+            if ((total_tasks/10) == 0)
+                        cout << histfile << " Completion percent: " << status << " " << i << " of " << total_tasks << " assigned" << endl;
+            else if(i%(total_tasks/10) == 0)
+                cout << histfile << " Completion percent: " << status << " " << i << " of " << total_tasks << " assigned" << endl;
+            
+            
+            // Modify bounds in case this is a self-calculation
+            
+            if (same)
+                looptwo_start = i+1;
+            else
+                looptwo_start = 0;
+            
+            // Compute the distances; Need to determine the flat index for the item ... Should be i*n_cluster_pairs
+            
+            for (int j=looptwo_start; j<clu2.size()/n_cluster_pairs; j++)
             {
-                
-                cout << "Rank: " << my_rank << " ERROR: computed bin larger than nbins:" << endl;
+                dist = 0;
+        
+                for (int k=0; k<n_cluster_pairs; k++)
+                    dist += pow(clu1[i*n_cluster_pairs+k] - clu2[j*n_cluster_pairs+k],2.0);
 
-                cout << "Rank: " << my_rank << " nbin: " << nbin << endl;
-                cout << "Rank: " << my_rank << " bin:  " << bin << endl;
-                cout << "Rank: " << my_rank << " binw: " << binw << endl;
-                cout << "Rank: " << my_rank << " maxd: " << maxd << endl;
-                cout << "Rank: " << my_rank << " dist: " << dist << endl;
-                cout << "Rank: " << my_rank << " clus: " << endl;
+                bin  = get_bin(binw, maxd, sqrt(dist));
                 
-                for (int m=0;m<n_cluster_pairs; m++)
-                    cout << "Rank: " << my_rank << clu1[i*n_cluster_pairs+m] << " <--> " << clu2[j*n_cluster_pairs +m] << endl;
-                cout << "Rank: " << my_rank << endl;
-                
-                exit(0);
+                if (bin > nbin)
+                {
+                    
+                    cout << "Rank: " << my_rank << " ERROR: computed bin larger than nbins:" << endl;
+                    cout << "Rank: " << my_rank << " nbin: " << nbin << endl;
+                    cout << "Rank: " << my_rank << " bin:  " << bin << endl;
+                    cout << "Rank: " << my_rank << " binw: " << binw << endl;
+                    cout << "Rank: " << my_rank << " maxd: " << maxd << endl;
+                    cout << "Rank: " << my_rank << " dist: " << dist << endl;
+                    cout << "Rank: " << my_rank << " clus: " << endl;
+                    
+                    for (int m=0;m<n_cluster_pairs; m++)
+                        cout << "Rank: " << my_rank << clu1[i*n_cluster_pairs+m] << " <--> " << clu2[j*n_cluster_pairs +m] << endl;
+                    cout << "Rank: " << my_rank << endl;
+                    
+                    exit(0);
+                }
+
+                my_hist[bin] += 1;
+                my_nsamples += 1;
             }
-
-            my_hist[bin] += 1;
-            my_nsamples += 1;
         }
-    }
     }
 
     if (my_rank == 0)
@@ -287,7 +289,7 @@ int main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-		
+        
     if (my_rank==0)
         cout << "Code compiled in MPI mode."; 
  
@@ -313,6 +315,9 @@ int main(int argc, char *argv[])
     
     string f1_2b = f1_idx + ".2b_clu-" + style + ".txt"; 
     string f2_2b = f2_idx + ".2b_clu-" + style + ".txt";
+    
+    if (my_rank ==0 )
+        cout << f1_2b << endl;
 
     
     vector<double> f1_2b_flat_clusters;
@@ -321,7 +326,10 @@ int main(int argc, char *argv[])
     int npairs_2b = 1;
     
     read_flat_clusters(f1_2b, npairs_2b, f1_2b_flat_clusters);
-    read_flat_clusters(f2_2b, npairs_2b, f2_2b_flat_clusters);        
+    read_flat_clusters(f2_2b, npairs_2b, f2_2b_flat_clusters);  
+    
+    if (my_rank ==0 )
+        cout << f1_2b_flat_clusters.size() << endl;      
     
 
     /////////////////////////////////////////////

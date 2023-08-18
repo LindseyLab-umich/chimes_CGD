@@ -15,7 +15,12 @@ assumes all atoms are the same type
 #include<vector>
 #include<cmath>
 
+#include<mpi.h>
+
 using namespace std;
+
+int nprocs;
+int my_rank;
 
 
 struct xyz
@@ -59,25 +64,60 @@ int split_line(string line, vector<string> & items)
     return items.size();
 }
 
+void divide_task(int & my_rank_start, int & my_rank_end, int tasks) 
+{
+    int procs_used;
+    int tasks_per_proc;
+
+    // Deal with no tasks to perform.
+    if ( tasks <= 0 ) 
+    {
+      my_rank_start = 1 ;
+      my_rank_end = 0 ;
+      return ;
+    }
+
+    // Deal gracefully with more tasks than processors.
+    if ( nprocs <= tasks ) 
+        procs_used = nprocs;
+    else
+        procs_used = tasks;
+ 
+    // Simple approach
+
+    tasks_per_proc = ceil(double(tasks)/double(procs_used));
+    
+    if (my_rank == 0)
+        cout <<"Assigning " << tasks_per_proc << " tasks per proc" << endl;
+    
+    my_rank_start = my_rank*tasks_per_proc;
+    
+    if (my_rank_start >= tasks)
+        my_rank_start = tasks;
+        
+    my_rank_end   = my_rank_start + tasks_per_proc;
+    
+    if (my_rank_end >= tasks)
+        my_rank_end = tasks-1;
+}
+
 bool get_next_line(istream& str, string & line)
 {
     // Read a line and return it, with error checking.
     
-        getline(str, line);
+    getline(str, line);
 
-        if(!str)
-            return false;
+    if(!str)
+        return false;
     
     return true;
 }
-
 
 double get_dist(xyz box, xyz a1, xyz a2)
 {
     double dx = a1.x - a2.x; dx -= box.x*round(dx/box.x);
     double dy = a1.y - a2.y; dy -= box.y*round(dy/box.y);
     double dz = a1.z - a2.z; dz -= box.z*round(dz/box.z);
-    
     
     double dist = sqrt(dx*dx + dy*dy + dz*dz);
     
@@ -88,8 +128,7 @@ double get_dist(xyz box, xyz a1, xyz a2)
         cout << "B: " << a2.x << " " << a2.y << " " << a2.z << endl;
         cout << dx << " " << dy << " " << dz << endl;
         exit(0);
-    }
-        
+    }   
         
     return sqrt(dx*dx + dy*dy + dz*dz);
 }
@@ -108,8 +147,22 @@ double transform(double rcin, double rcout,double lambda, double rij)
     return (exp(-1*rij/lambda) - x_avg)/x_diff;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
+    
+    my_rank = 0;
+    nprocs  = 1;
+
+    MPI_Init     (&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
+        
+    if (my_rank==0)
+        cout << "Code compiled in MPI mode."; 
+ 
+    if (my_rank==0)
+        cout <<" Will run on " << nprocs << " processor(s)." << endl;    
     
     /////////////////////////////////////////////
     // Hard-coded for now, for a single atom type: rcutin, rcut out, morse lambda
@@ -125,7 +178,7 @@ int main()
     // Read file name
     /////////////////////////////////////////////
     
-    string coord_file = "test.xyz";
+    string coord_file = argv[1]; // "test.xyz";
     
     
     /////////////////////////////////////////////
@@ -171,9 +224,6 @@ int main()
     boxdims.y = stod(line_contents[5]);
     boxdims.z = stod(line_contents[9]);
     
-    cout << "Read boxdims: " << boxdims.x << " " << boxdims.y << " " << boxdims.z << endl;
-    
-    
     /////////////////////////////////////////////
     // Read the atom coordinates
     /////////////////////////////////////////////
@@ -196,126 +246,127 @@ int main()
     // Extract all 2-, 3-, and 4-body clusters
     /////////////////////////////////////////////
     
-    vector<vector<double > > cludists_2b;   // dim 1: cluster index; dim 2, distance between atom pair
-    vector<vector<double > > cludists_3b;   // dim 1: cluster index; dim 2, distance between atom pairs
-    vector<vector<double > > cludists_4b;   // dim 1: cluster index; dim 2, distance between atom pairs
+    // Flatten for MPI
+    
+    vector<double> cludists_2b;   // dim = dim1 * dim2; dim 1: cluster index; dim 2, distance between atom pair
+    vector<double> cludists_3b;   // dim = dim1 * dim2; dim 1: cluster index; dim 2, distance between atom pairs
+    vector<double> cludists_4b;   // dim = dim1 * dim2; dim 1: cluster index; dim 2, distance between atom pairs
+    
     
     // ... define get dist
     
     vector<double> dist_2b(1);
     vector<double> dist_3b(3);
     vector<double> dist_4b(6);
- 
-    for (int i=0; i<natoms; i++)
-    {
-        for (int j=i+1; j<natoms; j++)
-        {
+    
+    // Distribute outer loop over processors
+    
+    int my_rank_start;
+    int my_rank_end;
+    int total_tasks;    // For accounting purposes
+    int status;         // For accounting purposes
+    
+    divide_task(my_rank_start, my_rank_end, natoms);    // Divide atoms on a per-processor basis.
+    total_tasks = my_rank_end-my_rank_start;
+    
+    if(my_rank ==0)
+        cout << "Dividing " << natoms << " tasks across " << nprocs << " processors" << endl;
 
-            //cout << "Calculating distances between atoms with index and coordinates:" << endl;
-            //cout << i << " " << coords[i].x << " " << coords[i].y << " " << coords[i].z << endl;
-            //cout << j << " " << coords[j].x << " " << coords[j].y << " " << coords[j].z << endl;
+
+    if (total_tasks>0)
+    {
+
+        for (int i=my_rank_start; i<my_rank_end; i++)
+        {   
+             
+            // Print progress
             
-            dist_2b[0] = get_dist(boxdims, coords[i], coords[j]);
-            
-            //cout << dist_2b[0] << endl;
-            
-            if (dist_2b[0] < rcout_2b)
+            status = double(i-my_rank_start)/(total_tasks)*100.0;
+
+            if (my_rank == 0) // This logic needed to avoid div by zero when total_tasks/10 is zero (since they are integer types)
+                if ((total_tasks/10) == 0)
+                    cout << "Completion percent: " << status << " " << i << " of " << total_tasks << " assigned" << endl;
+                
+            else if(i%(total_tasks/10) == 0)
+                cout << "Completion percent: " << status << " " << i << " of " << total_tasks << " assigned" << endl;    
+
+            // Do the calculation
+       
+            for (int j=i+1; j<natoms; j++)
             {
+
+                dist_2b[0] = get_dist(boxdims, coords[i], coords[j]);
+                
                 //cout << dist_2b[0] << endl;
                 
-                cludists_2b.push_back(dist_2b);
-                
-                if (dist_2b[0] >= rcout_3b)
-                    continue;
-                
-                for (int k=j+1; k<natoms; k++)
+                if (dist_2b[0] < rcout_2b)
                 {
-                    dist_3b[0] = dist_2b[0]; 
-                    dist_3b[1] = get_dist(boxdims, coords[i], coords[k]);
-                    
-                    if (dist_3b[1] >= rcout_3b)
-                        continue;
-                    
-                    dist_3b[2] = get_dist(boxdims, coords[j], coords[k]);
-                    
-                    if (dist_3b[2] >= rcout_3b)
-                        continue;
-                    
-                    cludists_3b.push_back(dist_3b);
-                    
-                    if (dist_3b[0] >= rcout_4b)
-                        continue; 
-                    if (dist_3b[1] >= rcout_4b)
-                        continue; 
-                    if (dist_3b[2] >= rcout_4b)
-                        continue; 
-                    
-                    
-                    for (int l=k+1; l<natoms; l++)
-                    {  
-                        dist_4b[0] = dist_3b[0]; // ij
-                        dist_4b[1] = dist_3b[1]; // ik
-                        dist_4b[2] = dist_3b[2]; // jk
-                        
-                        dist_4b[3] = get_dist(boxdims, coords[i], coords[l]);
-                    
-                        if (dist_4b[3] >= rcout_4b)
-                            continue;       
 
-                        dist_4b[4] = get_dist(boxdims, coords[j], coords[l]);
+                    cludists_2b.insert(cludists_2b.end(), dist_2b.begin(), dist_2b.end());    
                     
-                        if (dist_4b[4] >= rcout_4b)
-                            continue;      
-                        
-                        dist_4b[5] = get_dist(boxdims, coords[k], coords[l]);
+                    if (dist_2b[0] >= rcout_3b)
+                        continue;
                     
-                        if (dist_4b[5] >= rcout_4b)
-                            continue;  
+                    for (int k=j+1; k<natoms; k++)
+                    {
+                        dist_3b[0] = dist_2b[0]; 
+                        dist_3b[1] = get_dist(boxdims, coords[i], coords[k]);
                         
-                        cludists_4b.push_back(dist_4b);                                                                     
+                        if (dist_3b[1] >= rcout_3b)
+                            continue;
+                        
+                        dist_3b[2] = get_dist(boxdims, coords[j], coords[k]);
+                        
+                        if (dist_3b[2] >= rcout_3b)
+                            continue;
+                        
+                        
+                        cludists_3b.insert(cludists_3b.end(), dist_3b.begin(), dist_3b.end());
+                        
+                        if (dist_3b[0] >= rcout_4b)
+                            continue; 
+                        if (dist_3b[1] >= rcout_4b)
+                            continue; 
+                        if (dist_3b[2] >= rcout_4b)
+                            continue; 
+                        
+                        
+                        for (int l=k+1; l<natoms; l++)
+                        {  
+                            dist_4b[0] = dist_3b[0]; // ij
+                            dist_4b[1] = dist_3b[1]; // ik
+                            dist_4b[2] = dist_3b[2]; // jk
+                            
+                            dist_4b[3] = get_dist(boxdims, coords[i], coords[l]);
+                        
+                            if (dist_4b[3] >= rcout_4b)
+                                continue;       
+
+                            dist_4b[4] = get_dist(boxdims, coords[j], coords[l]);
+                        
+                            if (dist_4b[4] >= rcout_4b)
+                                continue;      
+                            
+                            dist_4b[5] = get_dist(boxdims, coords[k], coords[l]);
+                        
+                            if (dist_4b[5] >= rcout_4b)
+                                continue;  
+
+                            cludists_4b.insert(cludists_4b.end(), dist_4b.begin(), dist_4b.end());                                                                  
+                        }                      
                     }
-                                        
                 }
             }
         }
     }
     
-    cout << "   ...Calc done, printing results..." << endl;
+    MPI_Barrier(MPI_COMM_WORLD);
     
-    /////////////////////////////////////////////
-    // Print UNSORTED cluster distances (rij)
-    /////////////////////////////////////////////
+    if (my_rank == 0)
+        cout << "   ...Calc done, printing results..." << endl;
     
-    ofstream ofstream_2b_r;
-    ofstream ofstream_3b_r;
-    ofstream ofstream_4b_r;
-    
-    ofstream_2b_r.open("2b_clu-r.txt");
-    ofstream_3b_r.open("3b_clu-r.txt");
-    ofstream_4b_r.open("4b_clu-r.txt");
-    
-    for (int i=0; i<cludists_2b.size(); i++)
-        ofstream_2b_r << cludists_2b[i][0] << endl;
-    
-    for (int i=0; i<cludists_3b.size(); i++)
-    {
-        for (int j=0; j<3; j++)
-            ofstream_3b_r << cludists_3b[i][j] <<  " ";
-        ofstream_3b_r << endl;
-    }
-    
-    for (int i=0; i<cludists_4b.size(); i++)
-    {
-        for (int j=0; j<6; j++)
-            ofstream_4b_r << cludists_4b[i][j] <<  " "; 
-        ofstream_4b_r << endl;  
-    }
-    
-    ofstream_2b_r.close();
-    ofstream_3b_r.close();
-    ofstream_4b_r.close();
-    
-    
+
+  
     /////////////////////////////////////////////
     // Print UNSORTED cluster TRANSFORMED distances (sij)
     /////////////////////////////////////////////    
@@ -324,30 +375,31 @@ int main()
     ofstream ofstream_3b_s;
     ofstream ofstream_4b_s;
     
-    ofstream_2b_s.open("2b_clu-s.txt");
-    ofstream_3b_s.open("3b_clu-s.txt");
-    ofstream_4b_s.open("4b_clu-s.txt");
+    ofstream_2b_s.open("2b_clu-s-rank-" + to_string(my_rank) + "-block-" + argv[2] + ".txt");
+    ofstream_3b_s.open("3b_clu-s-rank-" + to_string(my_rank) + "-block-" + argv[2] + ".txt");
+    ofstream_4b_s.open("4b_clu-s-rank-" + to_string(my_rank) + "-block-" + argv[2] + ".txt");
     
     for (int i=0; i<cludists_2b.size(); i++)
-        ofstream_2b_s << transform(rcin, rcout_2b, lambda, cludists_2b[i][0]) << endl;
+        ofstream_2b_s << transform(rcin, rcout_2b, lambda, cludists_2b[i]) << endl;
 
     
     for (int i=0; i<cludists_3b.size(); i++)
     {
-        for (int j=0; j<3; j++)
-            ofstream_3b_s << transform(rcin, rcout_3b, lambda, cludists_3b[i][j]) << " ";
-        ofstream_3b_s << endl;
+        ofstream_3b_s << transform(rcin, rcout_3b, lambda, cludists_3b[i]) << " ";
+    if ((i+1)%3 == 0)
+            ofstream_3b_s << endl;
     }
     for (int i=0; i<cludists_4b.size(); i++)
     {
-        for (int j=0; j<6; j++)
-            ofstream_4b_s << transform(rcin, rcout_4b, lambda, cludists_4b[i][j]) <<  " ";  
-        ofstream_4b_s << endl;  
+        ofstream_4b_s << transform(rcin, rcout_4b, lambda, cludists_4b[i]) <<  " "; 
+    if ((i+1)%6 == 0) 
+            ofstream_4b_s << endl;  
     }    
     ofstream_2b_s.close();
     ofstream_3b_s.close();
     ofstream_4b_s.close();
-     
     
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Finalize();    
     
 }

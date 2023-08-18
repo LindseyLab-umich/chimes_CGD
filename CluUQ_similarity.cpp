@@ -41,7 +41,7 @@ int split_line(string line, vector<string> & items)
     return items.size();
 }
 
-bool get_next_line(istream& str, string & line)
+bool get_next_line(istream& str, string & line)    
 {
     // Read a line and return it, with error checking.
     
